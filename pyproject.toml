@@ -15,6 +15,7 @@ dependencies = [
 
     # Data validation and models
     "pydantic>=2.0.0",
+    "slocator-models",
 
     # Data processing
     "numpy>=1.24.0",
