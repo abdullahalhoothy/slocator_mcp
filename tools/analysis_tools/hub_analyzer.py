@@ -17,17 +17,8 @@ from context import get_app_context
 from logging_config import get_logger
 
 # Import Config for proper directory paths
-try:
-    from config_factory import Config
-except ImportError:
-    # Fallback if config import fails
-    class Config:
-        @staticmethod
-        def get_reports_path():
-            # Fallback to MCP_Server/reports if import fails
-            project_root = Path(__file__).parent.parent.parent
-            reports_path = project_root / "reports"
-            return str(reports_path)
+from config_factory import Config
+
 
 logger = get_logger(__name__)
 
