@@ -60,7 +60,7 @@ class ReqFetchDataset(ReqCityCountry, Coordinate):
 
     # User context
     user_id: Optional[str] = "default_user"
-    prdcer_lyr_id: Optional[str] = ""
+    layer_id: Optional[str] = ""
 
 
 class ReqClustersForSalesManData(BooleanQuery, UserId, ReqCityCountry):
