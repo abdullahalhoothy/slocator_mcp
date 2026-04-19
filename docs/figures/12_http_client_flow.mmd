@@ -1,0 +1,14 @@
+flowchart TD
+    A["post_to_backend\nendpoint, body, id_token, description"] --> B["Build envelope\n{message: description\nrequest_info: {}\nrequest_body: body}"]
+    B --> C["Build headers\nAuthorization: Bearer id_token\nContent-Type: application/json"]
+    C --> D["aiohttp POST\nBACKEND_BASE_URL + endpoint"]
+    D --> E{"status == 200?"}
+    E -- No --> F["raise BackendError\nstatus + response text"]
+    E -- Yes --> G["Parse JSON response"]
+    G --> H["Return response['data']"]
+
+    I["post_to_backend_no_auth\nendpoint, body"] --> J["Same envelope structure\nNo Authorization header"]
+    J --> K["aiohttp POST"]
+    K --> L{"status == 200?"}
+    L -- No --> M["raise BackendError"]
+    L -- Yes --> N["Return full JSON response"]

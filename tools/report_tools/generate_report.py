@@ -2,25 +2,17 @@
 
 import aiohttp
 import os
-import sys
 import numpy as np
 from datetime import datetime
 from typing import Dict, List, Tuple, Any, Optional
-from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-# Add parent directory to sys.path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from context import get_app_context
 from logging_config import get_logger
+from config import config
 
 logger = get_logger(__name__)
-
-# Configuration
-# API URL: Use BACKEND_URL for Docker inter-service calls (http://backend:8000), fallback to localhost for local dev
-API_BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # Report URL: Hardcoded to localhost:8000 for browser-accessible links
 REPORT_BASE_URL = "http://localhost:8000"
@@ -852,16 +844,9 @@ The analysis demonstrates that systematic geospatial clustering can achieve meas
 def save_report_to_file(report_content: str, metadata: Dict, report_type: str) -> str:
     """Save the generated report to a markdown file in the reports directory."""
     try:
-        # Import Config for shared reports path
-        from config_factory import Config
-
-        # Get shared reports directory path
-        reports_dir = Config.get_reports_path()
-
-        # Create reports directory if it doesn't exist
+        reports_dir = config.reports_path
         os.makedirs(reports_dir, exist_ok=True)
-        
-        # Generate filename
+
         city_name = safe_get(metadata, 'city_name', 'Unknown_City').replace(' ', '_')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{city_name}_territory_report_{report_type}_{timestamp}.md"
@@ -882,16 +867,9 @@ def save_report_to_file(report_content: str, metadata: Dict, report_type: str) -
 def save_html_report_to_file(html_content: str, metadata: Dict, report_type: str) -> str:
     """Save the generated HTML report to a file in the reports directory."""
     try:
-        # Import Config for shared reports path
-        from config_factory import Config
-
-        # Get shared reports directory path
-        reports_dir = Config.get_reports_path()
-
-        # Create reports directory if it doesn't exist
+        reports_dir = config.reports_path
         os.makedirs(reports_dir, exist_ok=True)
-        
-        # Generate filename
+
         city_name = safe_get(metadata, 'city_name', 'Unknown_City').replace(' ', '_')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{city_name}_territory_report_{report_type}_{timestamp}.html"

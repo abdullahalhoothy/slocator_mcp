@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant C as AI Client
+    participant MCP as mcp_server.py
+    participant T as Tool Function
+    participant AH as auth_helpers.py
+    participant SM as SessionManager
+    participant HC as http_client.py
+    participant BE as Backend API
+    participant HM as HandleManager
+
+    C->>MCP: Call tool with parameters
+    MCP->>T: Dispatch to registered tool
+    T->>AH: require_auth(session_manager)
+    AH->>SM: get_current_session()
+    SM-->>AH: SessionInfo or None
+    alt not authenticated
+        AH-->>T: "Please login first" string
+        T-->>C: Error message
+    end
+    AH->>SM: get_valid_id_token()
+    SM-->>AH: id_token (refreshed if needed)
+    AH-->>T: (session, user_id, id_token)
+    T->>T: Build request body (Pydantic model)
+    T->>HC: post_to_backend(endpoint, body, id_token)
+    HC->>BE: POST with Bearer token
+    BE-->>HC: JSON response
+    HC-->>T: response["data"]
+    T->>HM: store_data(data_type, location, data)
+    HM-->>T: handle string
+    T-->>C: Summary + handle

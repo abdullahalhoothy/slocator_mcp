@@ -1,0 +1,18 @@
+flowchart TD
+    A["Tool calls\nstore_data(data_type, location, data)"] --> B["Get session_id from SessionManager"]
+    B --> C["Generate filename\ndata_type_location_YYYYMMDDHHMMSSF_uuid8.json"]
+    C --> D["Serialize data to JSON\nvia json_handler"]
+    D --> E["Write to\nsessions/session_id/filename"]
+    E --> F["Return handle = filename"]
+
+    G["Tool calls\nread_data(handle)"] --> H{"Handle contains\n'/' path separator?"}
+    H -- Yes --> I["Treat as direct path"]
+    H -- No --> J["Scan all session directories\nfor matching filename"]
+    I --> K["Read JSON file"]
+    J --> K
+    K --> L["Return parsed dict"]
+
+    M["cleanup_expired_sessions(max_age_hours)"] --> N["List all session dirs"]
+    N --> O{"Last access >\nmax_age_hours?"}
+    O -- Yes --> P["_remove_directory_recursive()"]
+    O -- No --> Q["Keep session"]

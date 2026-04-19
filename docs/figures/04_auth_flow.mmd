@@ -1,0 +1,20 @@
+flowchart TD
+    A["user_login tool called\nemail + password"] --> B["get_current_session()"]
+    B --> C{"Session exists?"}
+    C -- No --> D["create_session()"]
+    C -- Yes --> E["Use existing session"]
+    D --> E
+    E --> F["post_to_backend_no_auth\nPOST /fastapi/login"]
+    F --> G{"HTTP 200?"}
+    G -- No --> H["Return error string to client"]
+    G -- Yes --> I["Extract id_token\nrefresh_token\nexpiresIn"]
+    I --> J["update_session_auth(tokens)"]
+    J --> K["Return success message\nwith session_id"]
+
+    subgraph "Token Refresh (automatic)"
+        L["get_valid_id_token()"] --> M{"Token expired?"}
+        M -- No --> N["Return current id_token"]
+        M -- Yes --> O["post_to_backend_no_auth\nPOST /fastapi/token/refresh"]
+        O --> P["update_session_auth(new_tokens)"]
+        P --> N
+    end

@@ -1,0 +1,21 @@
+services:
+  slocator-mcp:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      - BACKEND_URL=${BACKEND_URL:-http://localhost:8000}
+      - MCP_HOST=0.0.0.0
+      - MCP_SERVER_PORT=8001
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+    volumes:
+      - ./sessions:/app/sessions
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/sse"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

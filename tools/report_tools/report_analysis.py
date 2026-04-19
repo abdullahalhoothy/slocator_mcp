@@ -2,17 +2,12 @@
 
 import json
 import os
-import sys
 from typing import Optional
-from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
-
-# Add parent directory to sys.path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from context import get_app_context
 from logging_config import get_logger

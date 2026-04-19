@@ -3,21 +3,17 @@ Session management for MCP server.
 Handles session creation, authentication, and token refresh.
 """
 
-import os
+import asyncio
 import uuid
 import shutil
-import aiohttp
 from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
 
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-
 from models import SessionInfo
-from utils import use_json, convert_to_serializable
+from utils import use_json, convert_to_serializable, post_to_backend_no_auth, BackendError
 from logging_config import get_logger, setup_session_logging, end_session_logging
-from config import config, ENDPOINTS, BACKEND_BASE_URL
+from config import config
 
 logger = get_logger(__name__)
 
@@ -26,7 +22,7 @@ class SessionManager:
     """Manages user sessions including authentication and token management."""
 
     def __init__(self):
-        self.base_path = Path(config.temp_storage_path)
+        self.base_path = Path(config.sessions_path)
         self.current_session: Optional[SessionInfo] = None
         logger.info(
             "Session manager initialized with base path: %s", self.base_path
@@ -52,7 +48,7 @@ class SessionManager:
 
         self.current_session = session_info
         logger.info(
-            f"Created new session: {session_id} (expires: {session_info.expires_at})"
+            "Created new session: %s (expires: %s)", session_id, session_info.expires_at
         )
 
         return session_info
@@ -63,7 +59,7 @@ class SessionManager:
 
         session_path = self.base_path / session_id
         if session_path.exists():
-            shutil.rmtree(session_path)
+            await asyncio.to_thread(shutil.rmtree, session_path)
             logger.info("Cleaned up expired session: %s", session_id)
 
     async def get_current_session(self) -> Optional[SessionInfo]:
@@ -100,7 +96,7 @@ class SessionManager:
                                 )
                     except Exception as e:
                         logger.warning(
-                            f"Failed to load session {session_dir.name}: {e}"
+                            "Failed to load session %s: %s", session_dir.name, e
                         )
 
             if valid_sessions:
@@ -114,7 +110,7 @@ class SessionManager:
                     session_info.session_id, self.base_path / session_info.session_id
                 )
 
-                logger.info(f"Loaded session from disk: {session_info.session_id}")
+                logger.info("Loaded session from disk: %s", session_info.session_id)
                 return session_info
             else:
                 logger.info("No valid sessions found on disk")
@@ -157,7 +153,7 @@ class SessionManager:
         metadata = await use_json(metadata_path, "r")
         if not metadata:
             logger.error(
-                f"Could not find session metadata for {session_id} to update auth."
+                "Could not find session metadata for %s to update auth.", session_id
             )
             return
 
@@ -183,7 +179,7 @@ class SessionManager:
             )
 
         logger.info(
-            f"Updated auth tokens for user {user_id} in session {session_id}"
+            "Updated auth tokens for user %s in session %s", user_id, session_id
         )
 
     async def get_valid_id_token(self) -> tuple[Optional[str], Optional[str]]:
@@ -201,42 +197,28 @@ class SessionManager:
             or not session.token_expires_at
             or datetime.now() >= session.token_expires_at
         ):
-            logger.info(f"Token expired for user {session.user_id}. Refreshing...")
+            logger.info("Token expired for user %s. Refreshing...", session.user_id)
             try:
-                async with aiohttp.ClientSession() as http_session:
-                    endpoint_url = BACKEND_BASE_URL + ENDPOINTS.refresh_token
-                    payload = {
-                        "message": "refreshing token",
-                        "request_info": {},
-                        "request_body": {
-                            "grant_type": "refresh_token",
-                            "refresh_token": session.refresh_token,
-                        },
-                    }
-                    async with http_session.post(
-                        endpoint_url, json=payload
-                    ) as response:
-                        if response.status != 200:
-                            logger.error(
-                                f"Failed to refresh token: {await response.text()}"
-                            )
-                            return None, None
-
-                        token_data = (await response.json())["data"]
-                        await self.update_session_auth(
-                            session.session_id,
-                            token_data["localId"],
-                            token_data["idToken"],
-                            token_data["refreshToken"],
-                            int(token_data["expiresIn"]),
-                        )
-                        logger.info(
-                            f"Successfully refreshed token for user {session.user_id}."
-                        )
-                        # Important: return the newly fetched token, not the old one from session
-                        return token_data["localId"], token_data["idToken"]
+                token_data = await post_to_backend_no_auth(
+                    config.endpoints.refresh_token,
+                    {"grant_type": "refresh_token", "refresh_token": session.refresh_token},
+                    "refreshing token",
+                )
+                await self.update_session_auth(
+                    session.session_id,
+                    token_data["localId"],
+                    token_data["idToken"],
+                    token_data["refreshToken"],
+                    int(token_data["expiresIn"]),
+                )
+                logger.info("Successfully refreshed token for user %s.", session.user_id)
+                # Important: return the newly fetched token, not the old one from session
+                return token_data["localId"], token_data["idToken"]
+            except BackendError as e:
+                logger.error("Failed to refresh token: %s %s", e.status, e.text)
+                return None, None
             except Exception as e:
-                logger.error(f"Exception during token refresh: {e}")
+                logger.error("Exception during token refresh: %s", e)
                 return None, None
 
         # Token is still valid, return it

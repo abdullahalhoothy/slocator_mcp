@@ -3,28 +3,40 @@ name = "mcp-server"
 version = "0.1.0"
 description = "Saudi Location Intelligence MCP Server"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     # Core MCP and FastAPI dependencies
     "mcp>=1.0.0",
     "fastapi>=0.100.0",
-
     # Async I/O
     "aiohttp>=3.9.0",
     "aiofiles>=23.0.0",
-
     # Data validation and models
     "pydantic>=2.0.0",
     "slocator-models",
-
     # Data processing
     "numpy>=1.24.0",
-
     # LangChain for AI-powered analysis
     "langchain-core>=0.1.0",
     "langchain-openai>=0.0.5",
     "langchain-google-genai>=0.0.5",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
 ]
+
+[project.scripts]
+slocator-mcp = "mcp_server:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*", "sessions*", "reports*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [project.optional-dependencies]
 dev = [

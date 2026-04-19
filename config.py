@@ -1,67 +1,45 @@
 """
 Configuration for MCP server.
-Contains endpoint URLs and constants without external dependencies.
+Loads all settings from config.json; environment variables can override values.
 """
 
+import json
 import os
 from pathlib import Path
-from pydantic import BaseModel
+
+_ROOT = Path(__file__).parent
+_CONFIG_FILE = _ROOT / "config.json"
 
 
-class MCPConfig(BaseModel):
-    """MCP Server configuration."""
-
-    # Session settings
-    session_ttl_hours: int = 8
-    cleanup_interval_hours: int = 1
-    temp_storage_path: str = str(Path(__file__).parent / "sessions")
-
-
-class EndpointConfig:
-    """
-    Backend API endpoint configuration.
-    Replaces dependency on config_factory.CONF
-    """
-
-    def __init__(self):
-        # Base URL from environment or default
-        self.backend_base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-        self.base_uri = "/fastapi/"
-
-    @property
-    def login(self) -> str:
-        """Login endpoint."""
-        return self.base_uri + "login"
-
-    @property
-    def refresh_token(self) -> str:
-        """Token refresh endpoint."""
-        return self.base_uri + "token/refresh"
-
-    @property
-    def fetch_dataset(self) -> str:
-        """Fetch geospatial dataset endpoint."""
-        return self.base_uri + "fetch_dataset"
-
-    @property
-    def temp_sales_man_problem(self) -> str:
-        """Territory optimization endpoint."""
-        return self.base_uri + "temp_sales_man_problem"
-
-    @property
-    def hub_expansion_analysis(self) -> str:
-        """Hub expansion analysis endpoint."""
-        return self.base_uri + "hub_expansion_analysis"
-
-    @property
-    def smart_pharmacy_report(self) -> str:
-        """Smart pharmacy report endpoint."""
-        return self.base_uri + "smart_pharmacy_report"
+def _load() -> dict:
+    base: dict = {}
+    if _CONFIG_FILE.exists():
+        with open(_CONFIG_FILE) as f:
+            base = json.load(f)
+    return base
 
 
-# Global instances
-config = MCPConfig()
-ENDPOINTS = EndpointConfig()
+class _EndpointsConfig:
+    def __init__(self, endpoints: dict) -> None:
+        self.login: str = endpoints["login"]
+        self.refresh_token: str = endpoints["refresh_token"]
+        self.fetch_dataset: str = endpoints["fetch_dataset"]
+        self.temp_sales_man_problem: str = endpoints["temp_sales_man_problem"]
+        self.hub_expansion_analysis: str = endpoints["hub_expansion_analysis"]
+        self.smart_pharmacy_report: str = endpoints["smart_pharmacy_report"]
 
-# Convenience constant
-BACKEND_BASE_URL = ENDPOINTS.backend_base_url
+
+class Config:
+    def __init__(self, cfg: dict) -> None:
+        self.backend_url: str = str(cfg["backend_url"])
+        self.server_host: str = str(cfg["server_host"])
+        self.server_port: int = int(cfg["server_port"])
+        self.cors_origins: list[str] = str(cfg["cors_origins"]).split(",")
+        self.session_ttl_hours: int = int(cfg["session_ttl_hours"])
+        self.cleanup_interval_hours: int = int(cfg["cleanup_interval_hours"])
+        self.sessions_path: str = str(_ROOT / str(cfg["sessions_path"]))
+        self.reports_path: str = str(_ROOT / str(cfg["reports_path"]))
+        self.endpoints: _EndpointsConfig = _EndpointsConfig(cfg["endpoints"])
+
+
+config = Config(_load())

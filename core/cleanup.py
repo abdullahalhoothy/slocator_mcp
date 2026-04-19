@@ -4,9 +4,6 @@ Manages periodic session cleanup operations.
 """
 
 import asyncio
-from pathlib import Path
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
 
 from logging_config import get_logger
 from config import config

@@ -1,0 +1,11 @@
+flowchart TD
+    A["fetch_geospatial_data\nlat, lng, radius, boolean_query\ncity_name, action"] --> B["require_auth()"]
+    B --> C{"Authenticated?"}
+    C -- No --> D["Return auth error"]
+    C -- Yes --> E["Build ReqFetchDataset\nPydantic model"]
+    E --> F["post_to_backend\nPOST /fastapi/fetch_dataset"]
+    F --> G{"Response has\nfeatures?"}
+    G -- No --> H["Return 'No data' message"]
+    G -- Yes --> I["Extract districts\nand property types\nfrom feature properties"]
+    I --> J["store_data(geospatial_data,\ncity, GeoJSON)"]
+    J --> K["Return handle + summary\ncount · districts · types"]

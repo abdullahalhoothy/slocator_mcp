@@ -3,14 +3,12 @@ Handle management for MCP server.
 Manages data storage, retrieval, and cleanup operations.
 """
 
+import asyncio
 import os
 import shutil
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 from pathlib import Path
-
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
 
 from utils import use_json, convert_to_serializable
 from logging_config import get_logger
@@ -38,11 +36,11 @@ class HandleManager:
         session_path.mkdir(parents=True, exist_ok=True)
         session_id = session.session_id
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")
         handle = f"{data_type}_{location}_{timestamp}_{session_id}.json"
         file_path = str(session_path / handle)
 
-        logger.info(f"STORE: Saving {data_type} data for {location} to {handle}")
+        logger.info("STORE: Saving %s data for %s to %s", data_type, location, handle)
 
         # Convert and store data
         serializable_data = convert_to_serializable(data)
@@ -51,7 +49,7 @@ class HandleManager:
         # Touch session to update access time for cleanup
         await self._touch_session(session.session_id)
 
-        logger.info(f"STORE: Successfully stored data with handle: {handle}")
+        logger.info("STORE: Successfully stored data with handle: %s", handle)
         return handle
 
     async def read_data(self, handle: str) -> Optional[Dict]:
@@ -66,17 +64,17 @@ class HandleManager:
         session_path = self.session_manager.base_path / session.session_id
         file_path = str(session_path / handle)
 
-        logger.info(f"READ: Loading data from handle: {handle}")
+        logger.info("READ: Loading data from handle: %s", handle)
 
         if os.path.exists(file_path):
             data = await use_json(file_path, "r")
             if data:
                 # Update session access time
                 await self._touch_session(session.session_id)
-                logger.info(f"READ: Successfully loaded data from {handle}")
+                logger.info("READ: Successfully loaded data from %s", handle)
                 return data
 
-        logger.warning(f"READ: No data found for handle: {handle}")
+        logger.warning("READ: No data found for handle: %s", handle)
         return None
 
     async def list_session_data(
@@ -135,11 +133,11 @@ class HandleManager:
         try:
             if file_path.exists():
                 file_path.unlink()
-                logger.info(f"REMOVE: Deleted data file: {handle}")
+                logger.info("REMOVE: Deleted data file: %s", handle)
                 return True
             return False
         except Exception as e:
-            logger.error(f"REMOVE: Failed to delete {handle}: {e}")
+            logger.error("REMOVE: Failed to delete %s: %s", handle, e)
             return False
 
     # ===================== CLEANUP METHODS =====================
@@ -148,9 +146,7 @@ class HandleManager:
         self, max_age_hours: int = 24
     ) -> Dict[str, Any]:
         """Remove sessions older than max_age_hours."""
-        logger.info(
-            f"CLEANUP: Starting cleanup of sessions older than {max_age_hours} hours"
-        )
+        logger.info("CLEANUP: Starting cleanup of sessions older than %s hours", max_age_hours)
 
         cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
         sessions_dir = self.session_manager.base_path
@@ -179,12 +175,12 @@ class HandleManager:
 
                     cleaned_count += 1
                     freed_bytes += size
-                    logger.info(f"CLEANUP: Removed expired session {session_dir.name}")
+                    logger.info("CLEANUP: Removed expired session %s", session_dir.name)
 
             except Exception as e:
                 error_msg = f"Failed to cleanup session {session_dir.name}: {e}"
                 errors.append(error_msg)
-                logger.error(f"CLEANUP: {error_msg}")
+                logger.error("CLEANUP: %s", error_msg)
 
         result = {
             "cleaned": cleaned_count,
@@ -192,14 +188,12 @@ class HandleManager:
             "errors": errors,
         }
 
-        logger.info(f"CLEANUP: Completed - {result}")
+        logger.info("CLEANUP: Completed - %s", result)
         return result
 
     async def cleanup_large_sessions(self, max_size_mb: int = 100) -> Dict[str, Any]:
         """Remove sessions larger than max_size_mb."""
-        logger.info(
-            f"CLEANUP: Starting cleanup of sessions larger than {max_size_mb}MB"
-        )
+        logger.info("CLEANUP: Starting cleanup of sessions larger than %sMB", max_size_mb)
 
         sessions_dir = self.session_manager.base_path
         max_size_bytes = max_size_mb * 1024 * 1024
@@ -223,14 +217,15 @@ class HandleManager:
                     cleaned_count += 1
                     freed_bytes += size
                     logger.info(
-                        f"CLEANUP: Removed large session {session_dir.name} "
-                        f"({size/1024/1024:.1f}MB)"
+                        "CLEANUP: Removed large session %s (%.1fMB)",
+                        session_dir.name,
+                        size / 1024 / 1024,
                     )
 
             except Exception as e:
                 error_msg = f"Failed to cleanup large session {session_dir.name}: {e}"
                 errors.append(error_msg)
-                logger.error(f"CLEANUP: {error_msg}")
+                logger.error("CLEANUP: %s", error_msg)
 
         result = {
             "cleaned": cleaned_count,
@@ -238,12 +233,12 @@ class HandleManager:
             "errors": errors,
         }
 
-        logger.info(f"CLEANUP: Completed large session cleanup - {result}")
+        logger.info("CLEANUP: Completed large session cleanup - %s", result)
         return result
 
     async def cleanup_oldest_sessions(self, keep_count: int = 50) -> Dict[str, Any]:
         """Keep only the newest N sessions, remove the rest."""
-        logger.info(f"CLEANUP: Keeping only {keep_count} newest sessions")
+        logger.info("CLEANUP: Keeping only %s newest sessions", keep_count)
 
         sessions_dir = self.session_manager.base_path
 
@@ -260,9 +255,7 @@ class HandleManager:
                 last_access = await self._get_session_last_access(session_dir.name)
                 sessions.append((session_dir, last_access or datetime.min))
             except Exception as e:
-                logger.error(
-                    f"CLEANUP: Error getting session info for {session_dir.name}: {e}"
-                )
+                logger.error("CLEANUP: Error getting session info for %s: %s", session_dir.name, e)
 
         # Sort by last access (newest first) and keep only the top N
         sessions.sort(key=lambda x: x[1], reverse=True)
@@ -278,11 +271,11 @@ class HandleManager:
                 await self._remove_directory_recursive(session_dir)
                 cleaned_count += 1
                 freed_bytes += size
-                logger.info(f"CLEANUP: Removed old session {session_dir.name}")
+                logger.info("CLEANUP: Removed old session %s", session_dir.name)
             except Exception as e:
                 error_msg = f"Failed to cleanup old session {session_dir.name}: {e}"
                 errors.append(error_msg)
-                logger.error(f"CLEANUP: {error_msg}")
+                logger.error("CLEANUP: %s", error_msg)
 
         result = {
             "cleaned": cleaned_count,
@@ -290,7 +283,7 @@ class HandleManager:
             "errors": errors,
         }
 
-        logger.info(f"CLEANUP: Completed oldest session cleanup - {result}")
+        logger.info("CLEANUP: Completed oldest session cleanup - %s", result)
         return result
 
     async def get_storage_stats(self) -> Dict[str, Any]:
@@ -373,7 +366,7 @@ class HandleManager:
 
             await use_json(str(info_path), "w", info)
         except Exception as e:
-            logger.error(f"TOUCH: Failed to update session {session_id}: {e}")
+            logger.error("TOUCH: Failed to update session %s: %s", session_id, e)
 
     async def _get_session_last_access(self, session_id: str) -> Optional[datetime]:
         """Get last access time for a session."""
@@ -391,9 +384,7 @@ class HandleManager:
                 return datetime.fromtimestamp(session_path.stat().st_mtime)
 
         except Exception as e:
-            logger.error(
-                f"ACCESS_TIME: Error getting session time for {session_id}: {e}"
-            )
+            logger.error("ACCESS_TIME: Error getting session time for %s: %s", session_id, e)
 
         return None
 
@@ -405,7 +396,7 @@ class HandleManager:
                 if file_path.is_file():
                     total_size += file_path.stat().st_size
         except Exception as e:
-            logger.error(f"SIZE: Error calculating size for {directory}: {e}")
+            logger.error("SIZE: Error calculating size for %s: %s", directory, e)
         return total_size
 
     async def _calculate_directory_stats(self, directory: Path) -> Tuple[int, int]:
@@ -418,13 +409,13 @@ class HandleManager:
                     total_size += file_path.stat().st_size
                     file_count += 1
         except Exception as e:
-            logger.error(f"STATS: Error calculating stats for {directory}: {e}")
+            logger.error("STATS: Error calculating stats for %s: %s", directory, e)
         return total_size, file_count
 
     async def _remove_directory_recursive(self, directory: Path):
         """Safely remove directory and all contents."""
         try:
-            shutil.rmtree(directory)
+            await asyncio.to_thread(shutil.rmtree, directory)
         except Exception as e:
-            logger.error(f"REMOVE: Failed to remove directory {directory}: {e}")
+            logger.error("REMOVE: Failed to remove directory %s: %s", directory, e)
             raise
