@@ -34,7 +34,7 @@ async def post_to_backend(
     structure and attaches the Bearer token header.
 
     Args:
-        endpoint: Path relative to config.backend_url (e.g. "/fastapi/login").
+        endpoint: Path relative to config.backend.url (e.g. "/fastapi/login").
         request_body: The actual payload to send as request_body.
         id_token: JWT Bearer token for Authorization header.
         message: Human-readable description of the request (for logging).
@@ -45,7 +45,7 @@ async def post_to_backend(
     Raises:
         BackendError: If the backend returns a non-200 status.
     """
-    url = f"{config.backend_url}{endpoint}"
+    url = f"{config.backend.url}{endpoint}"
     payload = {
         "message": message,
         "request_info": {},
@@ -82,7 +82,7 @@ async def post_to_backend_no_auth(
     Raises:
         BackendError: If the backend returns a non-200 status.
     """
-    url = f"{config.backend_url}{endpoint}"
+    url = f"{config.backend.url}{endpoint}"
     payload = {
         "message": message,
         "request_info": {},

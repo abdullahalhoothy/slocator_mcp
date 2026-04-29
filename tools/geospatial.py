@@ -15,6 +15,8 @@ def register_geospatial_tools(mcp: FastMCP):
 
     logger.info("Registering geospatial tools with MCP server")
 
+    defaults = config.tool_defaults.geospatial
+
     @mcp.tool(
         name="fetch_geospatial_data",
         description="""Universal geospatial data fetcher for Saudi Arabia that ALWAYS returns GeoJSON format.
@@ -48,7 +50,7 @@ def register_geospatial_tools(mcp: FastMCP):
         lat: float = Field(description="Latitude of the search center point"),
         lng: float = Field(description="Longitude of the search center point"),
         radius: float = Field(
-            default=5000, description="Search radius in meters"
+            default=defaults.radius_m, description="Search radius in meters"
         ),
         boolean_query: str = Field(
             description="Boolean search query. Examples: 'warehouse OR logistics', 'restaurant AND NOT fast_food', 'gas_station'"
@@ -102,7 +104,7 @@ def register_geospatial_tools(mcp: FastMCP):
 
             try:
                 dataset = await post_to_backend(
-                    config.endpoints.fetch_dataset,
+                    config.backend.endpoints.fetch_dataset,
                     req_body.model_dump(),
                     id_token,
                     "Fetching Saudi location data via MCP",

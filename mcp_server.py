@@ -11,7 +11,7 @@ from starlette.applications import Starlette
 # Local imports
 from logging_config import get_logger
 from config import config
-from context import AppContext, get_app_context
+from context import get_app_context, set_app_context
 from core.handle_manager import HandleManager
 from core.session_manager import SessionManager
 
@@ -27,6 +27,7 @@ logger = get_logger(__name__)
 # ===== Initialize Global Managers =====
 session_manager = SessionManager()
 handle_manager = HandleManager(session_manager)
+set_app_context(session_manager, handle_manager)
 
 
 # ===== FastMCP with CORS Support =====
@@ -42,7 +43,7 @@ class FastMCPWithCORS(FastMCP):
         app = super().sse_app(mount_path)
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=config.cors_origins,
+            allow_origins=str(config.server.cors_origins).split(","),
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -53,8 +54,8 @@ class FastMCPWithCORS(FastMCP):
         """Override run to bind to 0.0.0.0 instead of 127.0.0.1"""
         import uvicorn
 
-        host = config.server_host
-        port = config.server_port
+        host = config.server.host
+        port = config.server.port
 
         if transport == "sse":
             app = self.sse_app()
@@ -64,7 +65,7 @@ class FastMCPWithCORS(FastMCP):
 
 
 # ===== FastMCP Server =====
-mcp = FastMCPWithCORS("saudi-location-intelligence", port=config.server_port)
+mcp = FastMCPWithCORS("saudi-location-intelligence", port=config.server.port)
 
 # Register all tools
 register_auth_tools(mcp)
@@ -94,9 +95,9 @@ async def get_current_session() -> str:
 def get_server_config() -> str:
     """Get server configuration information."""
     return f"""Saudi Location Intelligence MCP Server Configuration:
-- Session TTL: {config.session_ttl_hours} hours
-- Storage Path: {config.sessions_path}
-- Cleanup Interval: {config.cleanup_interval_hours} hours
+- Session TTL: {config.session.ttl_hours} hours
+- Storage Path: {config.paths.sessions_dir}
+- Cleanup Interval: {config.cleanup.interval_hours} hours
 - Server Name: saudi-location-intelligence
 - Available Tools: auth (4), geospatial (1), territory (1), reports (2), hub (1), pharmacy (1)
 - Transport Support: stdio, SSE
@@ -108,8 +109,8 @@ def main():
     """Main entry point for the MCP server."""
     logger.info("🇸🇦 Saudi Location Intelligence MCP Server")
 
-    logger.info("Starting SSE transport on http://%s:%s/sse", config.server_host, config.server_port)
-    logger.info("Connect MCP Inspector to: http://localhost:%s/sse", config.server_port)
+    logger.info("Starting SSE transport on http://%s:%s/sse", config.server.host, config.server.port)
+    logger.info("Connect MCP Inspector to: http://localhost:%s/sse", config.server.port)
 
     # Get the SSE app and run it with uvicorn
     mcp.run("sse")

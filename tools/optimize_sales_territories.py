@@ -13,6 +13,8 @@ logger = get_logger(__name__)
 def register_territory_optimization_tools(mcp: FastMCP):
     """Register territory optimization tool by defining it within this function's scope."""
 
+    defaults = config.tool_defaults.territory
+
     @mcp.tool(
         name="optimize_sales_territories",
         description="""Advanced sales territory optimization using spatial clustering and market analysis.
@@ -61,11 +63,11 @@ def register_territory_optimization_tools(mcp: FastMCP):
             default="Saudi Arabia", description="Country name"
         ),
         num_sales_man: int = Field(
-            default=5,
+            default=defaults.num_territories,
             description="Number of sales territories to create (recommended: 3-10 for optimal balance)",
         ),
         distance_limit: float = Field(
-            default=3.0,
+            default=defaults.distance_limit_km,
             description="Maximum distance customers will travel to reach services (km). Typical values: 2-5km urban, 5-15km rural",
         ),
         boolean_query: str = Field(
@@ -98,7 +100,7 @@ def register_territory_optimization_tools(mcp: FastMCP):
 
             try:
                 territory_data = await post_to_backend(
-                    config.endpoints.temp_sales_man_problem,
+                    config.backend.endpoints.temp_sales_man_problem,
                     req_body.model_dump(),
                     id_token,
                     "Optimizing sales territories using spatial clustering",

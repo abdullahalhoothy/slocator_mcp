@@ -1,183 +1,139 @@
-import asyncio
 import json
-import os
-from typing import Dict, Any, Optional
 from datetime import datetime
+from typing import Any, Dict, Optional
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
+from config import config
 from context import get_app_context
 from logging_config import get_logger
-from config import config
-from utils import post_to_backend, require_auth, BackendError
+from tools._base import call_backend
+from utils import require_auth, save_report
 
 logger = get_logger(__name__)
 
 
-def register_natural_language_hub_analyzer_tools(mcp: FastMCP):
-    """Register natural language hub analyzer tool."""
+def _format_short_response(response_data: Dict[str, Any]) -> str:
+    if "error" in response_data:
+        return f" Error: {response_data['error']}\nDetails: {response_data.get('details', 'No details')}"
+    if "data" not in response_data:
+        return f" Unexpected response format: {json.dumps(response_data, indent=2, ensure_ascii=False)}"
 
-    logger.info("Registering natural language hub analyzer tool with MCP server")
+    data = response_data["data"]
+    out = " **HUB EXPANSION ANALYSIS RESULTS**\n" + "=" * 50 + "\n\n"
 
-    async def call_hub_expansion_internal(
-        request_body: Dict[str, Any], jwt_token: str
-    ) -> Dict[str, Any]:
-        """Call the hub expansion analysis API and return a normalized response dict."""
-        try:
-            data = await post_to_backend(
-                config.endpoints.hub_expansion_analysis,
-                request_body,
-                jwt_token,
-                "Hub expansion analysis via natural language MCP tool",
-            )
-            return {"data": data}
-        except BackendError as e:
-            logger.error("Hub expansion API error %s: %s", e.status, e.text)
-            return {"error": f"API returned {e.status}", "details": e.text}
-        except Exception as e:
-            logger.error("Error calling hub expansion API: %s", e)
-            return {"error": "Request failed", "details": str(e)}
+    summary = data.get("analysis_summary") or {}
+    if summary:
+        out += " **ANALYSIS SUMMARY**\n"
+        out += f"• Scope: {summary.get('scope', 'N/A')}\n"
+        out += f"• Methodology: {summary.get('methodology', 'N/A')}\n"
+        out += f"• Qualified Locations: {summary.get('total_qualified_locations', 0)}\n"
+        out += f"• Target Type: {summary.get('target_type', 'N/A')}\n"
+        out += f"• Competitor: {summary.get('competitor_analyzed', 'N/A')}\n\n"
 
-    def format_hub_analysis_response(response_data: Dict[str, Any]) -> str:
-        """Format the hub expansion analysis response in a readable way."""
-        if "error" in response_data:
-            return f" Error: {response_data['error']}\nDetails: {response_data.get('details', 'No details')}"
+    primary = (data.get("primary_recommendation") or {}).get("hub_details") or {}
+    if primary:
+        location = primary.get("location") or {}
+        specs = primary.get("specifications") or {}
+        metrics = primary.get("performance_metrics") or {}
+        out += " **PRIMARY RECOMMENDATION**\n"
+        out += f"• Hub ID: {primary.get('hub_id', 'N/A')}\n"
+        out += f"• Address: {location.get('address', 'N/A')}\n"
+        out += f"• District: {location.get('district', 'N/A')}\n"
+        coords = location.get("coordinates") or {}
+        if coords:
+            out += f"• Coordinates: {coords.get('lat', 'N/A')}, {coords.get('lng', 'N/A')}\n"
+        out += f"• Size: {specs.get('size_m2', 0):,} m²\n"
+        out += f"• Monthly Rent: {specs.get('monthly_rent', 0):,} SAR\n"
+        out += f"• Rent per m²: {specs.get('rent_per_m2', 0)} SAR\n"
+        out += f"• **Total Score: {metrics.get('total_score', 0)}/10**\n"
+        components = metrics.get("component_scores") or {}
+        if components:
+            out += "• Component Scores:\n"
+            for name, score in components.items():
+                out += f"  - {name.replace('_', ' ').title()}: {score}/10\n"
+        out += "\n"
 
-        if "data" not in response_data:
-            return f" Unexpected response format: {json.dumps(response_data, indent=2, ensure_ascii=False)}"
+    alternatives = data.get("alternative_locations") or []
+    if alternatives:
+        out += "🔄 **ALTERNATIVE LOCATIONS**\n"
+        for i, alt in enumerate(alternatives[:3], 1):
+            loc = alt.get("location") or {}
+            mtr = alt.get("performance_metrics") or {}
+            out += f"{i}. {alt.get('hub_id', 'N/A')} - Score: {mtr.get('total_score', 0)}/10\n"
+            out += f"   Address: {loc.get('address', 'N/A')}\n"
+        out += "\n"
 
-        data = response_data["data"]
+    market = data.get("market_competitive_analysis") or {}
+    if market:
+        out += " **MARKET ANALYSIS**\n"
+        out += f"• Population Centers: {market.get('total_population_centers', 0)}\n"
+        out += f"• Target Locations: {market.get('total_target_locations', 0)}\n"
+        out += f"• Competitor Locations: {market.get('total_competitor_locations', 0)}\n"
+        out += f"• Min Population Threshold: {market.get('min_population_threshold', 0):,}\n\n"
 
-        result = " **HUB EXPANSION ANALYSIS RESULTS**\n"
-        result += "=" * 50 + "\n\n"
+    return out
 
-        if "analysis_summary" in data:
-            summary = data["analysis_summary"]
-            result += " **ANALYSIS SUMMARY**\n"
-            result += f"• Scope: {summary.get('scope', 'N/A')}\n"
-            result += f"• Methodology: {summary.get('methodology', 'N/A')}\n"
-            result += f"• Qualified Locations: {summary.get('total_qualified_locations', 0)}\n"
-            result += f"• Target Type: {summary.get('target_type', 'N/A')}\n"
-            result += f"• Competitor: {summary.get('competitor_analyzed', 'N/A')}\n\n"
 
-        if "primary_recommendation" in data and data["primary_recommendation"]:
-            primary = data["primary_recommendation"]
-            if "hub_details" in primary:
-                hub = primary["hub_details"]
-                result += " **PRIMARY RECOMMENDATION**\n"
-                result += f"• Hub ID: {hub.get('hub_id', 'N/A')}\n"
+def _build_markdown_report(
+    response_data: Dict[str, Any], request_params: Dict[str, Any]
+) -> str:
+    if "error" in response_data or "data" not in response_data:
+        return "# Error Report\n\nFailed to generate analysis report due to API errors."
 
-                location = hub.get("location", {})
-                result += f"• Address: {location.get('address', 'N/A')}\n"
-                result += f"• District: {location.get('district', 'N/A')}\n"
+    data = response_data["data"]
+    city_name = str(request_params.get("city_name", "Unknown City"))
+    target_search = str(request_params.get("target_search", ""))
+    competitor_name = str(request_params.get("competitor_name", ""))
+    target_display = target_search.replace("@", "") or "supermarkets"
+    competitor_display = competitor_name.replace("@", "") or "competitor"
+    hub_type = str(request_params.get("hub_type", "warehouse"))
+    current_date = datetime.now().strftime("%B %d, %Y")
 
-                coords = location.get("coordinates", {})
-                if coords:
-                    result += f"• Coordinates: {coords.get('lat', 'N/A')}, {coords.get('lng', 'N/A')}\n"
+    primary = (data.get("primary_recommendation") or {}).get("hub_details") or {}
+    hub_id = str(primary.get("hub_id", "N/A"))
+    location_info = primary.get("location") or {}
+    district = str(location_info.get("district") or "Unknown District")
 
-                specs = hub.get("specifications", {})
-                result += f"• Size: {specs.get('size_m2', 0):,} m²\n"
-                result += f"• Monthly Rent: {specs.get('monthly_rent', 0):,} SAR\n"
-                result += f"• Rent per m²: {specs.get('rent_per_m2', 0)} SAR\n"
+    metrics = primary.get("performance_metrics") or {}
+    target_access = metrics.get("target_access") or {}
+    competitive_pos = metrics.get("competitive_positioning") or {}
+    population_access = metrics.get("population_access") or {}
+    rent_details = metrics.get("rent_details") or {}
+    coverage_analysis = metrics.get("coverage_analysis") or {}
+    component_scores = metrics.get("component_scores") or {}
 
-                metrics = hub.get("performance_metrics", {})
-                result += f"• **Total Score: {metrics.get('total_score', 0)}/10**\n"
+    target_time = target_access.get("time_minutes", "N/A")
+    nearest_target = target_access.get("nearest_target", "N/A")
+    competitor_distance = competitive_pos.get("distance_km", "N/A")
+    nearest_competitor = competitive_pos.get("nearest_competitor_name", "N/A")
+    avg_time_to_centers = population_access.get("avg_time_to_centers", "N/A")
+    accessible_population = population_access.get("accessible_population", 0)
 
-                component_scores = metrics.get("component_scores", {})
-                if component_scores:
-                    result += "• Component Scores:\n"
-                    for component, score in component_scores.items():
-                        result += f"  - {component.replace('_', ' ').title()}: {score}/10\n"
-                result += "\n"
+    coordinates = location_info.get("coordinates") or {}
+    lat = coordinates.get("lat", 0)
+    lng = coordinates.get("lng", 0)
+    address = location_info.get("address", "N/A")
 
-        if "alternative_locations" in data and data["alternative_locations"]:
-            result += "🔄 **ALTERNATIVE LOCATIONS**\n"
-            for i, alt in enumerate(data["alternative_locations"][:3], 1):
-                location = alt.get("location", {})
-                metrics = alt.get("performance_metrics", {})
-                result += f"{i}. {alt.get('hub_id', 'N/A')} - Score: {metrics.get('total_score', 0)}/10\n"
-                result += f"   Address: {location.get('address', 'N/A')}\n"
-            result += "\n"
+    specifications = primary.get("specifications") or {}
+    size_m2 = specifications.get("size_m2", 0)
+    monthly_rent = specifications.get("monthly_rent", 0)
+    rent_per_m2 = specifications.get("rent_per_m2", 0)
 
-        if "market_competitive_analysis" in data:
-            market = data["market_competitive_analysis"]
-            result += " **MARKET ANALYSIS**\n"
-            result += f"• Population Centers: {market.get('total_population_centers', 0)}\n"
-            result += f"• Target Locations: {market.get('total_target_locations', 0)}\n"
-            result += f"• Competitor Locations: {market.get('total_competitor_locations', 0)}\n"
-            result += f"• Min Population Threshold: {market.get('min_population_threshold', 0):,}\n\n"
+    primary_score = metrics.get("total_score", 0)
+    comp_score = component_scores.get("competitive_advantage_score", 0)
+    rent_score = component_scores.get("rent_efficiency_score", 0)
+    rent_percentile = rent_details.get("percentile", "N/A")
+    total_coverage = coverage_analysis.get("total_coverage", 0)
+    coverage_percentage = coverage_analysis.get("coverage_percentage", 0)
 
-        return result
+    market_analysis = data.get("market_competitive_analysis") or {}
+    total_competitors = market_analysis.get("total_competitor_locations", 0)
+    total_targets = market_analysis.get("total_target_locations", 0)
+    total_population_centers = market_analysis.get("total_population_centers", 0)
 
-    def generate_markdown_report(
-        response_data: Dict[str, Any], request_params: Dict[str, Any]
-    ) -> str:
-        """Generate a comprehensive markdown report."""
-        if "error" in response_data or "data" not in response_data:
-            return "# Error Report\n\nFailed to generate analysis report due to API errors."
-
-        try:
-            data = response_data["data"]
-
-            city_name = str(request_params.get("city_name", "Unknown City"))
-            target_search = request_params.get("target_search", "@الحلقه@")
-            competitor_name = request_params.get("competitor_name", "@نينجا@")
-
-            target_display = target_search.replace("@", "") if target_search else "supermarkets"
-            competitor_display = competitor_name.replace("@", "") if competitor_name else "competitor"
-
-            hub_type = str(request_params.get("hub_type", "warehouse"))
-            current_date = datetime.now().strftime("%B %d, %Y")
-
-            primary_rec = data.get("primary_recommendation", {}).get("hub_details", {})
-            hub_id = str(primary_rec.get("hub_id", "N/A"))
-            location_info = primary_rec.get("location", {})
-            district = (
-                str(location_info.get("district", "Unknown District"))
-                if location_info.get("district")
-                else "Unknown District"
-            )
-
-            metrics = primary_rec.get("performance_metrics", {})
-            target_access = metrics.get("target_access", {})
-            competitive_pos = metrics.get("competitive_positioning", {})
-
-            target_time = target_access.get("time_minutes", "N/A")
-            nearest_target = target_access.get("nearest_target", "N/A")
-            target_distance = target_access.get("distance_km", "N/A")
-
-            competitor_distance = competitive_pos.get("distance_km", "N/A")
-            nearest_competitor = competitive_pos.get("nearest_competitor_name", "N/A")
-
-            market_analysis = data.get("market_competitive_analysis", {})
-            total_competitors = market_analysis.get("total_competitor_locations", 0)
-            coordinates = location_info.get("coordinates", {})
-            lat = coordinates.get("lat", 0) if coordinates else 0
-            lng = coordinates.get("lng", 0) if coordinates else 0
-            address = location_info.get("address", "N/A")
-
-            specifications = primary_rec.get("specifications", {})
-            size_m2 = specifications.get("size_m2", 0)
-            monthly_rent = specifications.get("monthly_rent", 0)
-            rent_per_m2 = specifications.get("rent_per_m2", 0)
-
-            component_scores = metrics.get("component_scores", {})
-            primary_score = metrics.get("total_score", 0)
-            comp_score = component_scores.get("competitive_advantage_score", 0)
-            rent_score = component_scores.get("rent_efficiency_score", 0)
-
-            population_access = metrics.get("population_access", {})
-            avg_time_to_centers = population_access.get("avg_time_to_centers", "N/A")
-            accessible_population = population_access.get("accessible_population", 0)
-
-            rent_details = metrics.get("rent_details", {})
-            rent_percentile = rent_details.get("percentile", "N/A")
-
-            coverage_analysis = metrics.get("coverage_analysis", {})
-            total_coverage = coverage_analysis.get("total_coverage", 0)
-            coverage_percentage = coverage_analysis.get("coverage_percentage", 0)
-
-            report = f"""# **Logistics Expansion Analysis Report: {city_name} Market Entry Strategy**
+    report = f"""# **Logistics Expansion Analysis Report: {city_name} Market Entry Strategy**
 
 **Prepared for:** [Client Name]
 **Prepared by:** Geospatial Intelligence Platform
@@ -193,7 +149,7 @@ def register_natural_language_hub_analyzer_tools(mcp: FastMCP):
 **Key Findings:**
 - **Market Opportunity:** {accessible_population:,} potential customers within optimal delivery zones
 - **Competitive Advantage:** {competitor_distance}km distance from nearest competitor ({nearest_competitor})
-- **Coverage Optimization:** {coverage_percentage}% of target population reachable within 25-minute delivery window
+- **Coverage Optimization:** {coverage_percentage}% of target population reachable within service window
 
 ---
 
@@ -201,14 +157,9 @@ def register_natural_language_hub_analyzer_tools(mcp: FastMCP):
 
 ### **Competitor Landscape Analysis**
 
-**Major Competitors Identified:**
-1. **{competitor_display}** - {total_competitors} distribution centers, strong central coverage
-2. **Aramex** - 8 hubs, focus on commercial districts
-3. **SMSA Express** - 15 locations, broad but thin coverage
-
-**Market Gap Analysis:**
-- **Eastern Quadrant:** 67% underserved compared to city average
-- **{target_display} Integration:** Only 23% of competitors have sub-5-minute {target_display} access
+- **Primary Competitor Tracked:** {competitor_display} — {total_competitors} locations identified in this market
+- **{target_display} Locations Indexed:** {total_targets}
+- **Population Centers Considered:** {total_population_centers}
 
 ---
 
@@ -216,32 +167,27 @@ def register_natural_language_hub_analyzer_tools(mcp: FastMCP):
 
 ### **Multi-Criteria Scoring Results**
 
-We evaluated {data.get('analysis_summary', {}).get('total_qualified_locations', 67)} {hub_type} locations.
+We evaluated {data.get('analysis_summary', {}).get('total_qualified_locations', 0)} {hub_type} locations.
 
 | **Rank** | **Location ID** | **District** | **Total Score** | **{target_display} Proximity** | **Population Access** | **Rent Efficiency** |
-|----------|-----------------|--------------|-----------------|--------------------------------|----------------------|-------------------|
+|----------|-----------------|--------------|-----------------|--------------------------------|----------------------|---------------------|
 | 1 | {hub_id} | {district} | {primary_score} | {target_time} min | {avg_time_to_centers} min | SAR {rent_per_m2}/m² |"""
 
-            alternatives = data.get("alternative_locations", [])
-            for i, alt in enumerate(alternatives[:4], 2):
-                alt_id = alt.get("hub_id", f"HUB-{i:03d}")
-                alt_location = alt.get("location", {})
-                alt_district = (
-                    alt_location.get("district", "Various")
-                    if alt_location.get("district")
-                    else "Various"
-                )
-                alt_metrics = alt.get("performance_metrics", {})
-                alt_total = alt_metrics.get("total_score", 0)
-                alt_target_access = alt_metrics.get("target_access", {})
-                alt_target_time = alt_target_access.get("time_minutes", "N/A")
-                alt_pop_access = alt_metrics.get("population_access", {})
-                alt_pop_time = alt_pop_access.get("avg_time_to_centers", "N/A")
-                alt_specs = alt.get("specifications", {})
-                alt_rent = alt_specs.get("rent_per_m2", 0)
-                report += f"\n| {i} | {alt_id} | {alt_district} | {alt_total} | {alt_target_time} min | {alt_pop_time} min | SAR {alt_rent}/m² |"
+    for i, alt in enumerate((data.get("alternative_locations") or [])[:4], 2):
+        alt_id = alt.get("hub_id", f"HUB-{i:03d}")
+        alt_loc = alt.get("location") or {}
+        alt_mtr = alt.get("performance_metrics") or {}
+        alt_specs = alt.get("specifications") or {}
+        report += (
+            f"\n| {i} | {alt_id} | "
+            f"{alt_loc.get('district') or 'Various'} | "
+            f"{alt_mtr.get('total_score', 0)} | "
+            f"{(alt_mtr.get('target_access') or {}).get('time_minutes', 'N/A')} min | "
+            f"{(alt_mtr.get('population_access') or {}).get('avg_time_to_centers', 'N/A')} min | "
+            f"SAR {alt_specs.get('rent_per_m2', 0)}/m² |"
+        )
 
-            report += f"""
+    report += f"""
 
 ### **Detailed Site Analysis: Primary Recommendation**
 
@@ -260,7 +206,7 @@ We evaluated {data.get('analysis_summary', {}).get('total_qualified_locations', 
 
 - **Rent Efficiency Score:** {rent_score}/10 (Percentile: {rent_percentile})
 - **Population Coverage:** {total_coverage:,} people within service range
-- **Cost per Potential Customer:** SAR {monthly_rent/max(accessible_population, 1):.2f}/month
+- **Cost per Potential Customer:** SAR {monthly_rent / max(accessible_population, 1):.2f}/month
 - **Initial Setup Cost:** SAR {monthly_rent * 6:,} (6 months advance + setup)
 
 ---
@@ -273,44 +219,14 @@ Strategic positioning at {hub_id} in {district} provides optimal balance of mark
 
 **Report prepared using advanced geospatial intelligence platform. All projections based on current market conditions as of {current_date}.**"""
 
-            return report
+    return report
 
-        except Exception as e:
-            logger.error("Error generating markdown report: %s", e)
-            return f"# Error Report\n\nFailed to generate analysis report: {str(e)}"
 
-    async def save_report_to_file(
-        report_content: str, city_name: str, timestamp: str
-    ) -> tuple[str, str]:
-        """Save the markdown report to the reports directory."""
-        try:
-            current_dir = config.reports_path
-            os.makedirs(current_dir, exist_ok=True)
+def register_natural_language_hub_analyzer_tools(mcp: FastMCP):
+    logger.info("Registering natural language hub analyzer tool with MCP server")
 
-            safe_city_name = "".join(
-                c for c in city_name.replace(" ", "_") if c.isalnum() or c in "_-"
-            )
-            filename = f"{safe_city_name}_hub_expansion_{timestamp}.md"
-            file_path = os.path.join(current_dir, filename)
-
-            if isinstance(report_content, bytes):
-                report_content = report_content.decode("utf-8")
-
-            def _write():
-                with open(file_path, "w", encoding="utf-8", errors="replace") as f:
-                    f.write(report_content)
-
-            await asyncio.to_thread(_write)
-
-            if os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-                return file_path, f" Report saved to: {file_path} ({file_size:,} bytes)"
-            return "", f"Error: File was not created at {file_path}"
-
-        except PermissionError as e:
-            return "", f"Permission error saving report: {e}"
-        except Exception as e:
-            return "", f"Error saving report to file: {e}"
+    defaults = config.tool_defaults.hub
+    weights = defaults.scoring_weights
 
     @mcp.tool(
         name="hub_expansion_analyzer",
@@ -332,47 +248,18 @@ Strategic positioning at {hub_id} in {district} provides optimal balance of mark
         """,
     )
     async def hub_expansion_analyzer(
-        city_name: str = Field(default="Riyadh", description="Target city for hub expansion analysis"),
-        country_name: str = Field(default="Saudi Arabia", description="Target country"),
-        target_search: str = Field(
-            default="@الحلقه@",
-            description="Target destinations to analyze proximity to",
-        ),
-        competitor_name: str = Field(
-            default="@نينجا@",
-            description="Competitor name to analyze against",
-        ),
-        hub_type: str = Field(
-            default="warehouse_for_rent",
-            description="Type of hub to search for",
-        ),
-        max_target_distance_km: float = Field(
-            default=5.0,
-            description="Maximum distance to target destinations in kilometers",
-        ),
-        max_population_center_time_minutes: int = Field(
-            default=15,
-            description="Maximum travel time to population centers in minutes",
-        ),
-        top_results_count: int = Field(
-            default=5,
-            description="Number of top-ranked locations to return",
-        ),
-        min_facility_size_m2: Optional[int] = Field(
-            default=None,
-            description="Minimum facility size in square meters",
-        ),
-        max_rent_per_m2: Optional[float] = Field(
-            default=None,
-            description="Maximum rent per square meter",
-        ),
-        generate_report: bool = Field(
-            default=False,
-            description="Generate and save a comprehensive markdown report",
-        ),
+        city_name: str = Field(default=defaults.city_name, description="Target city for hub expansion analysis"),
+        country_name: str = Field(default=defaults.country_name, description="Target country"),
+        target_search: str = Field(default=defaults.target_search, description="Target destinations to analyze proximity to"),
+        competitor_name: str = Field(default=defaults.competitor_name, description="Competitor name to analyze against"),
+        hub_type: str = Field(default=defaults.hub_type, description="Type of hub to search for"),
+        max_target_distance_km: float = Field(default=defaults.max_target_distance_km, description="Maximum distance to target destinations in kilometers"),
+        max_population_center_time_minutes: int = Field(default=defaults.max_population_center_time_minutes, description="Maximum travel time to population centers in minutes"),
+        top_results_count: int = Field(default=defaults.top_results_count, description="Number of top-ranked locations to return"),
+        min_facility_size_m2: Optional[int] = Field(default=None, description="Minimum facility size in square meters"),
+        max_rent_per_m2: Optional[float] = Field(default=None, description="Maximum rent per square meter"),
+        generate_report: bool = Field(default=False, description="Generate and save a comprehensive markdown report"),
     ) -> str:
-        """Analyze hub expansion opportunities with comprehensive location scoring."""
-
         try:
             app_ctx = get_app_context(mcp)
             auth = await require_auth(app_ctx.session_manager)
@@ -388,38 +275,42 @@ Strategic positioning at {hub_id} in {district} provides optimal balance of mark
                 "analysis_bounds": {},
                 "target_search": target_search,
                 "max_target_distance_km": max_target_distance_km,
-                "max_target_time_minutes": 8,
+                "max_target_time_minutes": defaults.max_target_time_minutes,
                 "competitor_name": competitor_name,
-                "competitor_analysis_radius_km": 2.0,
+                "competitor_analysis_radius_km": defaults.competitor_analysis_radius_km,
                 "hub_type": hub_type,
                 "min_facility_size_m2": min_facility_size_m2,
                 "max_rent_per_m2": max_rent_per_m2,
-                "max_population_center_distance_km": 10.0,
+                "max_population_center_distance_km": defaults.max_population_center_distance_km,
                 "max_population_center_time_minutes": max_population_center_time_minutes,
-                "min_population_threshold": 1000,
+                "min_population_threshold": defaults.min_population_threshold,
                 "scoring_weights": {
-                    "target_proximity": 0.35,
-                    "population_access": 0.30,
-                    "rent_efficiency": 0.10,
-                    "competitive_advantage": 0.15,
-                    "population_coverage": 0.10,
+                    "target_proximity": weights.target_proximity,
+                    "population_access": weights.population_access,
+                    "rent_efficiency": weights.rent_efficiency,
+                    "competitive_advantage": weights.competitive_advantage,
+                    "population_coverage": weights.population_coverage,
                 },
                 "top_results_count": top_results_count,
-                "include_route_optimization": True,
-                "include_market_analysis": True,
-                "include_success_metrics": True,
+                "include_route_optimization": defaults.include_route_optimization,
+                "include_market_analysis": defaults.include_market_analysis,
+                "include_success_metrics": defaults.include_success_metrics,
                 "user_id": user_id,
             }
 
-            response_data = await call_hub_expansion_internal(request_body, id_token)
+            response_data = await call_backend(
+                "hub_expansion_analysis",
+                request_body,
+                id_token,
+                "Hub expansion analysis via natural language MCP tool",
+            )
 
             if "error" in response_data:
-                error_response = format_hub_analysis_response(response_data)
                 return json.dumps(
                     {
                         "report_file": "",
                         "data_files": {},
-                        "response": error_response,
+                        "response": _format_short_response(response_data),
                         "metadata": {"error": True, "analysis_type": "hub_expansion", "city": city_name},
                     },
                     ensure_ascii=False,
@@ -432,33 +323,20 @@ Strategic positioning at {hub_id} in {district} provides optimal balance of mark
                 data=response_data,
             )
 
-            formatted_response = format_hub_analysis_response(response_data)
-
             saved_report_file = ""
-            report_generation_info = ""
-
             if generate_report:
-                try:
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    request_params = {
-                        "city_name": city_name,
-                        "country_name": country_name,
-                        "target_search": target_search,
-                        "competitor_name": competitor_name,
-                        "hub_type": hub_type,
-                        "max_target_distance_km": max_target_distance_km,
-                        "max_population_center_time_minutes": max_population_center_time_minutes,
-                    }
-                    report_content = generate_markdown_report(response_data, request_params)
-                    if report_content.strip():
-                        saved_report_file, report_generation_info = await save_report_to_file(
-                            report_content, city_name, timestamp
-                        )
-                    else:
-                        report_generation_info = "Error: Generated report content is empty"
-                except Exception as e:
-                    logger.exception("Error during report generation")
-                    report_generation_info = f"Error generating report: {e}"
+                request_params = {
+                    "city_name": city_name,
+                    "country_name": country_name,
+                    "target_search": target_search,
+                    "competitor_name": competitor_name,
+                    "hub_type": hub_type,
+                    "max_target_distance_km": max_target_distance_km,
+                    "max_population_center_time_minutes": max_population_center_time_minutes,
+                }
+                report_content = _build_markdown_report(response_data, request_params)
+                if report_content.strip():
+                    saved_report_file = await save_report(report_content, city_name, "hub_expansion")
 
             analysis_summary = (
                 f" **Analysis Parameters**:\n"
@@ -467,12 +345,12 @@ Strategic positioning at {hub_id} in {district} provides optimal balance of mark
                 f" **Hub Type**: {hub_type}\n"
                 f" **Competitor**: {competitor_name}\n"
                 f" **Results**: Top {top_results_count} locations\n\n"
-                + formatted_response
+                + _format_short_response(response_data)
                 + f"\n **Data Handle**: `{handle}`"
             )
 
-            if generate_report:
-                analysis_summary += f"\n\n**Report Generation**: {report_generation_info}"
+            if generate_report and saved_report_file:
+                analysis_summary += f"\n\n**Report saved to**: {saved_report_file}"
 
             return json.dumps(
                 {

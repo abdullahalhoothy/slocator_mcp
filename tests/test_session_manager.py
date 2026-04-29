@@ -33,13 +33,13 @@ async def test_create_session_writes_metadata(session_manager, tmp_path):
 
 @pytest.mark.asyncio
 async def test_create_session_sets_expiry(session_manager):
-    """Newly created session should expire roughly config.session_ttl_hours in the future."""
+    """Newly created session should expire roughly config.session.ttl_hours in the future."""
     from config import config
     session = await session_manager.create_session()
     now = datetime.now()
 
     # Allow ±5 seconds slop
-    expected = now + timedelta(hours=config.session_ttl_hours)
+    expected = now + timedelta(hours=config.session.ttl_hours)
     diff = abs((session.expires_at - expected).total_seconds())
     assert diff < 5
 

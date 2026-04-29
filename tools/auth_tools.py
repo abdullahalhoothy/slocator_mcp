@@ -37,7 +37,7 @@ def register_auth_tools(mcp: FastMCP):
 
             try:
                 login_data = await post_to_backend_no_auth(
-                    config.endpoints.login,
+                    config.backend.endpoints.login,
                     {"email": email, "password": password},
                     "login request from mcp server",
                 )

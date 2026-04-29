@@ -1,74 +1,54 @@
-"""
-Background cleanup task for MCP server.
-Manages periodic session cleanup operations.
-"""
+"""Background cleanup task for expired and oversized sessions."""
 
 import asyncio
 
-from logging_config import get_logger
 from config import config
-from core.handle_manager import HandleManager
-from core.session_manager import SessionManager
+from logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
 async def cleanup_expired_sessions(handle_manager):
-    """
-    Periodic cleanup of expired sessions using HandleManager.
-    Runs continuously in background until cancelled.
-    """
     logger.info("Background session cleanup task started")
 
     while True:
         try:
             logger.info("Starting automated cleanup cycle...")
 
-            # Clean expired sessions (older than configured TTL)
             expired_stats = await handle_manager.cleanup_expired_sessions(
-                max_age_hours=config.session_ttl_hours or 24
+                max_age_hours=config.session.ttl_hours
             )
-
-            # Clean large sessions (over 100MB)
-            large_stats = await handle_manager.cleanup_large_sessions(max_size_mb=100)
-
-            # Get storage statistics
+            large_stats = await handle_manager.cleanup_large_sessions(
+                max_size_mb=config.cleanup.max_session_size_mb
+            )
             storage_stats = await handle_manager.get_storage_stats()
 
-            # If total storage is too high, clean oldest sessions
-            if storage_stats["total_size_mb"] > 500:  # Over 500MB total
+            if storage_stats["total_size_mb"] > config.cleanup.max_total_size_mb:
                 oldest_stats = await handle_manager.cleanup_oldest_sessions(
-                    keep_count=50  # Keep only 50 newest sessions
+                    keep_count=config.cleanup.keep_session_count
                 )
-                logger.info(f"Storage cleanup: {oldest_stats}")
+                logger.info("Storage cleanup: %s", oldest_stats)
 
-            # Log cleanup results
             total_cleaned = expired_stats["cleaned"] + large_stats["cleaned"]
             total_freed = expired_stats["freed_mb"] + large_stats["freed_mb"]
 
             if total_cleaned > 0:
                 logger.info(
-                    f"Cleanup completed: {total_cleaned} sessions removed, "
-                    f"{total_freed:.1f}MB freed. Storage stats: {storage_stats}"
+                    "Cleanup completed: %s sessions removed, %.1fMB freed. Storage stats: %s",
+                    total_cleaned, total_freed, storage_stats,
                 )
             else:
-                logger.info(
-                    f"Cleanup completed: No sessions removed. "
-                    f"Storage stats: {storage_stats}"
-                )
+                logger.info("Cleanup completed: No sessions removed. Storage stats: %s", storage_stats)
 
-            # Log any errors
             all_errors = expired_stats["errors"] + large_stats["errors"]
             if all_errors:
-                logger.warning(f"Cleanup errors: {all_errors}")
+                logger.warning("Cleanup errors: %s", all_errors)
 
-            # Sleep for cleanup interval
-            await asyncio.sleep(config.cleanup_interval_hours * 3600)
+            await asyncio.sleep(config.cleanup.interval_hours * 3600)
 
         except asyncio.CancelledError:
             logger.info("Background session cleanup task cancelled")
-            break  # Exit the loop when cancelled
-        except Exception as e:
-            logger.error(f"Error in session cleanup: {e}")
-            logger.exception("Full cleanup error details:")
-            await asyncio.sleep(300)  # Sleep 5 minutes on error
+            break
+        except Exception:
+            logger.exception("Error in session cleanup")
+            await asyncio.sleep(config.cleanup.retry_interval_seconds)

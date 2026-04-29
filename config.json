@@ -1,18 +1,102 @@
 {
-  "backend_url": "http://localhost:8000",
-  "server_host": "0.0.0.0",
-  "server_port": 8100,
-  "cors_origins": "*",
-  "session_ttl_hours": 8,
-  "cleanup_interval_hours": 1,
-  "sessions_path": "sessions",
-  "reports_path": "reports",
-  "endpoints": {
-    "login": "/fastapi/login",
-    "refresh_token": "/fastapi/token/refresh",
-    "fetch_dataset": "/fastapi/fetch_dataset",
-    "temp_sales_man_problem": "/fastapi/temp_sales_man_problem",
-    "hub_expansion_analysis": "/fastapi/hub_expansion_analysis",
-    "smart_pharmacy_report": "/fastapi/smart_pharmacy_report"
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8100,
+    "transport": "sse",
+    "cors_origins": "*"
+  },
+  "backend": {
+    "url": "http://localhost:8000",
+    "endpoints": {
+      "login": "/fastapi/login",
+      "refresh_token": "/fastapi/token/refresh",
+      "fetch_dataset": "/fastapi/fetch_dataset",
+      "temp_sales_man_problem": "/fastapi/temp_sales_man_problem",
+      "hub_expansion_analysis": "/fastapi/hub_expansion_analysis",
+      "smart_pharmacy_report": "/fastapi/smart_pharmacy_report"
+    }
+  },
+  "session": {
+    "ttl_hours": 8,
+    "token_expiry_buffer_seconds": 60
+  },
+  "cleanup": {
+    "interval_hours": 1,
+    "max_session_size_mb": 100,
+    "max_total_size_mb": 500,
+    "keep_session_count": 50,
+    "retry_interval_seconds": 300
+  },
+  "paths": {
+    "sessions_dir": "sessions",
+    "reports_dir": "reports",
+    "secrets_file": "secrets/secrets_llm.json"
+  },
+  "llm": {
+    "model": "gemini-2.5-flash",
+    "temperature": 0.0
+  },
+  "tool_defaults": {
+    "geospatial": {
+      "radius_m": 5000
+    },
+    "territory": {
+      "num_territories": 5,
+      "distance_limit_km": 3.0
+    },
+    "hub": {
+      "city_name": "Riyadh",
+      "country_name": "Saudi Arabia",
+      "target_search": "@الحلقه@",
+      "competitor_name": "@نينجا@",
+      "hub_type": "warehouse_for_rent",
+      "max_target_distance_km": 5.0,
+      "max_target_time_minutes": 8,
+      "competitor_analysis_radius_km": 2.0,
+      "max_population_center_distance_km": 10.0,
+      "max_population_center_time_minutes": 15,
+      "min_population_threshold": 1000,
+      "top_results_count": 5,
+      "include_route_optimization": true,
+      "include_market_analysis": true,
+      "include_success_metrics": true,
+      "scoring_weights": {
+        "target_proximity": 0.35,
+        "population_access": 0.30,
+        "rent_efficiency": 0.10,
+        "competitive_advantage": 0.15,
+        "population_coverage": 0.10
+      }
+    },
+    "pharmacy": {
+      "city_name": "Riyadh",
+      "country_name": "Saudi Arabia",
+      "potential_business_type": "pharmacy",
+      "ecosystem_string_name": "healthcare",
+      "target_income_level": "medium",
+      "target_age": 30,
+      "analysis_radius": 1000,
+      "complementary_categories": ["hospital", "dentist"],
+      "optimal_num_complementary_businesses_per_category": 2,
+      "cross_shopping_categories": ["grocery_store", "supermarket"],
+      "optimal_num_cross_shopping_businesses_per_category": 3,
+      "competition_categories": ["pharmacy"],
+      "max_competition_threshold_per_category": 1,
+      "cross_shopping_weight": 0.1,
+      "scoring_weights": {
+        "traffic": 25.0,
+        "demographics": 30.0,
+        "competition": 15.0,
+        "healthcare": 20.0,
+        "complementary": 10.0
+      }
+    },
+    "territory_report": {
+      "balance_thresholds": {
+        "excellent": 0.10,
+        "good": 0.20,
+        "acceptable": 0.30
+      }
+    }
   }
 }

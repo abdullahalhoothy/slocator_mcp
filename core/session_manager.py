@@ -22,7 +22,7 @@ class SessionManager:
     """Manages user sessions including authentication and token management."""
 
     def __init__(self):
-        self.base_path = Path(config.sessions_path)
+        self.base_path = Path(config.paths.sessions_dir)
         self.current_session: Optional[SessionInfo] = None
         logger.info(
             "Session manager initialized with base path: %s", self.base_path
@@ -36,7 +36,7 @@ class SessionManager:
 
         session_info = SessionInfo(
             session_id=session_id,
-            expires_at=datetime.now() + timedelta(hours=config.session_ttl_hours),
+            expires_at=datetime.now() + timedelta(hours=config.session.ttl_hours),
         )
 
         # Store session metadata
@@ -161,8 +161,9 @@ class SessionManager:
         metadata["id_token"] = id_token
         metadata["refresh_token"] = refresh_token
         metadata["token_expires_at"] = (
-            datetime.now() + timedelta(seconds=expires_in - 60)
-        ).isoformat()  # -60s buffer
+            datetime.now()
+            + timedelta(seconds=expires_in - config.session.token_expiry_buffer_seconds)
+        ).isoformat()
 
         await use_json(metadata_path, "w", metadata)
 
@@ -200,7 +201,7 @@ class SessionManager:
             logger.info("Token expired for user %s. Refreshing...", session.user_id)
             try:
                 token_data = await post_to_backend_no_auth(
-                    config.endpoints.refresh_token,
+                    config.backend.endpoints.refresh_token,
                     {"grant_type": "refresh_token", "refresh_token": session.refresh_token},
                     "refreshing token",
                 )
